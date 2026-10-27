@@ -1,12 +1,18 @@
 {
-  "framework": null,
-  "installCommand": "npm ci --prefix frontend",
-  "buildCommand": "npm run build --prefix frontend",
-  "outputDirectory": "frontend/dist",
-  "functions": {
-    "api/index.py": {
-      "includeFiles": "backend/{app,data}/**"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "backend": {
+      "root": "backend/",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app"
+    },
+    "frontend": {
+      "root": "frontend/",
+      "framework": "vite"
     }
   },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "frontend" } }
+  ]
 }

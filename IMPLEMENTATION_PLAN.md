@@ -69,9 +69,9 @@ https://data.elexon.co.uk/bmrs/api/v1/datasets/WINDFOR/stream?publishDateTimeFro
 - [ ] `docker compose up --build` works from a clean clone.
 
 ## Phase 5 — Deploy to Vercel (≈1.5 h)
-- [ ] `api/index.py` imports the FastAPI app. Add a root `requirements.txt` for Vercel.
-- [ ] `vercel.json`: build the frontend, route `/api/(.*)` → Python function, everything else → `index.html`.
-- [ ] Make sure CSV paths work inside the serverless function (use paths relative to the file).
+- [x] `vercel.json` with **Vercel Services**: `backend` (FastAPI, `backend/`, entrypoint `app.main:app`) and `frontend` (Vite, `frontend/`).
+- [x] Public routes: `/api/(.*)` → backend (it receives the full `/api/...` path), everything else → frontend. No bindings: nothing calls another service server-side.
+- [x] CSV paths are relative to the code file, so they work inside the function.
 - [ ] Deploy and test the live URL in **incognito**.
 
 ## Phase 6 — README & repo (≈1 h)

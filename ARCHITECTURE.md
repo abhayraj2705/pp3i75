@@ -63,13 +63,11 @@ Snapshot contents: 19,272 forecast rows (264 runs, 30 Dec 2025 → 31 Jan 2026) 
 ├── ARCHITECTURE.md             # this file
 ├── IMPLEMENTATION_PLAN.md      # the phase-by-phase build plan
 ├── docker-compose.yml          # runs backend + frontend locally
-├── vercel.json                 # Vercel deploy: static frontend + Python function
-├── requirements.txt            # Python packages for the Vercel function
-├── api/
-│   └── index.py                # Vercel entrypoint: imports the FastAPI app from backend/
+├── vercel.json                 # Vercel Services: backend at /api/*, frontend at /
 │
 ├── backend/
 │   ├── Dockerfile
+│   ├── .python-version         # 3.12 (used by Vercel)
 │   ├── requirements.txt        # runtime packages
 │   ├── requirements-dev.txt    # + pytest, httpx
 │   ├── app/
@@ -191,7 +189,7 @@ sequenceDiagram
 |---|---|
 | Docker | `docker compose up --build` → app http://localhost:8080, API docs http://localhost:8000/docs |
 | Local dev | `cd backend && uvicorn app.main:app --reload` and `cd frontend && npm run dev` → http://localhost:5173 |
-| Production | **Vercel**: `frontend/` is built as a static site, `api/index.py` runs FastAPI as a Python serverless function on the same domain (`/api/*` rewrite). |
+| Production | **Vercel Services** (one project, one domain): `backend` service = FastAPI from `backend/` (entrypoint `app.main:app`), public at `/api/*`. `frontend` service = Vite build of `frontend/`, public at `/`. The browser calls `/api` on the same domain, so no CORS and no service bindings are needed. |
 
 ---
 

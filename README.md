@@ -77,7 +77,8 @@ python -m scripts.fetch_data
 | `frontend/src/theme.js` | Chart colours (light/dark) and number formatting |
 | `frontend/Dockerfile`, `frontend/nginx.conf` | Frontend container (build with Node, serve with nginx) |
 | `docker-compose.yml` | Runs both containers together |
-| `api/index.py`, `vercel.json`, `requirements.txt` | Vercel deployment (static frontend + Python function) |
+| `vercel.json` | Vercel deployment: two services (`backend` at `/api/*`, `frontend` at `/`) |
+| `backend/.python-version` | Python version used by Vercel (3.12) |
 | `ARCHITECTURE.md` | Design, data flow, domain notes and findings |
 | `IMPLEMENTATION_PLAN.md` | The phase-by-phase build plan |
 
