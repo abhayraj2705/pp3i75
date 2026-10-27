@@ -1,11 +1,12 @@
-# Architecture — UK Wind Forecast Monitor
+# Architecture — GB Wind Forecast Monitor
 
 A small web app for a UK utility's **day-ahead trading team**. It answers two questions:
 
-1. **"What does the latest wind forecast say for tomorrow?"** (the forecast they could actually see at decision time)
-2. **"How much can we trust that forecast?"** (measured error, compared with what really happened)
+1. **"What did the latest wind forecast say for tomorrow, at the moment I had to decide?"**
+2. **"How much can we trust that forecast?"** (measured error against what really happened)
 
-Scope: national GB **wind** only, Elexon data only, purchase decisions made in **January 2026**.
+Scope: national GB **wind** only, Elexon data only, purchase decisions made in **January 2026**
+(so delivery days **2 Jan → 1 Feb 2026**).
 
 ---
 
@@ -13,24 +14,25 @@ Scope: national GB **wind** only, Elexon data only, purchase decisions made in *
 
 | Term | Meaning |
 |---|---|
-| Day-ahead market | Power for day **D** is bought on day **D-1**, before the auction closes (about 09:20–11:00 UK time). |
-| Decision time (cutoff) | When the trader must decide. Default **D-1 10:00 UK time** (the user can change this). |
+| Day-ahead market | Power for day **D** is bought on day **D-1**, before the auction closes (mid-morning UK time). |
+| Decision time (cutoff) | When the trader must decide. Default **D-1 10:00 UK time**; the user can change it (00:00–23:00). |
 | Actual (FUELHH, `fuelType=WIND`) | Metered wind generation in MW, every **30 min** (`startTime`). |
-| Forecast (WINDFOR) | Predicted wind generation in MW, **hourly** `startTime`. A new forecast run is published about every 2–3 h (`publishTime`) and looks ~2–3 days ahead. |
-| Horizon / lead time | `startTime - publishTime`, meaning how far ahead the forecast was made. |
-| Residual demand | Demand minus wind, meaning what must be bought from other sources. Wind error therefore turns straight into buying error. |
+| Forecast (WINDFOR) | Predicted wind generation in MW, **hourly** `startTime`. **8 runs per day** (`publishTime` 02:30, 04:30, 07:30, 09:30, 11:30, 15:30, 18:30, 22:30 UTC), each looking **46–66 h** ahead. |
+| Horizon / lead time | `startTime − publishTime`: how far ahead the forecast was made. |
+| Error | **actual − forecast**. Negative = less wind than forecast = the trader has to buy more at short notice. |
 
-**The core rule (the most important logic in the app):**
+### The core rule (most important logic in the app)
 
-> For each target hour T on delivery day D, use the forecast from the **latest `publishTime` that is ≤ the cutoff (D-1 10:00)**.
+> For each target hour T on delivery day D, use the forecast with the **latest `publishTime` that is ≤ the cutoff (D-1 at the chosen hour, UK time)**.
 
-This is the forecast the trader *really had* when they decided. Using any later forecast would be cheating ("look-ahead bias").
+This is the forecast the trader *really had* when deciding. Using any later forecast would be
+look-ahead bias, and that is tested explicitly.
 
-Sample data checked on the live API:
-- WINDFOR: `{"publishTime":"2026-01-10T11:30:00Z","startTime":"2026-01-09T21:00:00Z","generation":12443}`
-- FUELHH: `{"startTime":"2026-01-10T23:30:00Z","fuelType":"WIND","generation":8051, ...}`
-
-Because forecasts are hourly and actuals are half-hourly, **we compare only on the hour** (we use the actual at `HH:00`). This is simple and easy to explain. (Another option would be to average the two half-hours. We note it but do not build it.)
+Things we learned from the real data (and handle):
+- With the 10:00 cutoff the **09:30 run on D-1** is used. It covers D at 14.5–37.5 h ahead.
+- The 22:30 run only reaches 46.5 h ahead. So for a cutoff **before 02:30**, hours 22:00–23:00 of D have
+  **no forecast available**. The app does not invent values; it shows a note instead.
+- Forecasts are hourly and actuals are half-hourly, so we **compare on the hour** (actual at `HH:00`).
 
 ---
 
@@ -38,18 +40,18 @@ Because forecasts are hourly and actuals are half-hourly, **we compare only on t
 
 ```mermaid
 flowchart LR
-    E[Elexon BMRS API<br/>FUELHH + WINDFOR] -->|one-time script<br/>scripts/fetch_data.py| D[(backend/data/*.csv<br/>committed to repo)]
-    D -->|loaded once at startup| B[Python FastAPI backend<br/>selection + metrics]
+    E[Elexon BMRS API<br/>FUELHH + WINDFOR] -->|one-time script<br/>backend/scripts/fetch_data.py| D[(backend/data/*.csv<br/>committed to repo)]
+    D -->|loaded once per process| B[Python FastAPI backend<br/>selection + metrics]
     B -->|JSON over /api/*| F[React frontend<br/>Vite + Recharts]
     U[Trader in browser] --> F
 ```
 
-**Why pre-download the data?** January 2026 is in the past, so the data will not change. Saving it as CSV:
-- makes the app fast (no Elexon call per request),
-- means the deployed demo cannot break if Elexon is slow or down,
-- makes tests repeatable.
+**Why pre-download the data?** January 2026 is in the past, so the data will not change. Saving it as CSV
+makes the app fast, means the demo cannot break if Elexon is slow, and makes tests repeatable.
+Re-run the script at any time to refresh it.
 
-The fetch script can be re-run at any time to refresh it.
+Snapshot contents: 19,272 forecast rows (264 runs, 30 Dec 2025 → 31 Jan 2026) and
+1,536 actual rows (every half hour of 1 Jan → 1 Feb 2026, no gaps).
 
 ---
 
@@ -57,119 +59,109 @@ The fetch script can be re-run at any time to refresh it.
 
 ```
 <repo>/
-├── README.md                  # what/how/link (required deliverable)
-├── ARCHITECTURE.md            # this file
-├── IMPLEMENTATION_PLAN.md     # step-by-step build plan
-├── docker-compose.yml         # runs backend + frontend locally
-├── vercel.json                # Vercel deploy config (static frontend + Python API)
-│
+├── README.md                   # what / how to run / live link
+├── ARCHITECTURE.md             # this file
+├── IMPLEMENTATION_PLAN.md      # the phase-by-phase build plan
+├── docker-compose.yml          # runs backend + frontend locally
+├── vercel.json                 # Vercel deploy: static frontend + Python function
+├── requirements.txt            # Python packages for the Vercel function
 ├── api/
-│   └── index.py               # Vercel entrypoint: `from app.main import app`
+│   └── index.py                # Vercel entrypoint: imports the FastAPI app from backend/
 │
 ├── backend/
 │   ├── Dockerfile
-│   ├── requirements.txt       # fastapi, uvicorn, pandas, requests, pytest
+│   ├── requirements.txt        # runtime packages
+│   ├── requirements-dev.txt    # + pytest, httpx
 │   ├── app/
-│   │   ├── main.py            # FastAPI app, routes, CORS
-│   │   ├── config.py          # constants: dates, default cutoff, data paths
-│   │   ├── data_store.py      # load CSVs into pandas once (cached)
-│   │   ├── forecast.py        # CORE: pick latest forecast before cutoff
-│   │   └── metrics.py         # MAE, RMSE, bias, percentiles, by-hour, by-horizon
+│   │   ├── config.py           # constants: delivery dates, default cutoff, paths
+│   │   ├── data_store.py       # load CSVs into pandas once (lru_cache)
+│   │   ├── forecast.py         # CORE: pick latest forecast before the cutoff
+│   │   ├── metrics.py          # MAE, RMSE, bias, percentiles, by-hour, by-horizon, bias correction
+│   │   └── main.py             # FastAPI routes (thin)
 │   ├── data/
-│   │   ├── actuals_wind.csv   # startTime, generation
-│   │   └── forecasts_wind.csv # publishTime, startTime, generation
+│   │   ├── actuals_wind.csv    # startTime, generation
+│   │   └── forecasts_wind.csv  # publishTime, startTime, generation
 │   ├── scripts/
-│   │   └── fetch_data.py      # downloads from Elexon → CSV
+│   │   └── fetch_data.py       # downloads from Elexon → CSV
 │   └── tests/
-│       ├── test_forecast.py   # selection rule (no look-ahead!)
-│       └── test_metrics.py
+│       ├── test_forecast.py    # selection rule, time zones, real-data checks
+│       ├── test_metrics.py     # metrics vs hand-calculated values
+│       └── test_api.py         # endpoints, validation errors
 │
 └── frontend/
-    ├── Dockerfile
-    ├── package.json
-    ├── vite.config.js         # dev proxy /api → backend:8000
+    ├── Dockerfile              # build with Node, serve with nginx
+    ├── nginx.conf              # serves the app, forwards /api → backend container
+    ├── vite.config.js          # dev server, proxies /api → localhost:8000
+    ├── index.html
     └── src/
-        ├── main.jsx
-        ├── App.jsx            # header + two tabs
-        ├── api.js             # fetch helpers for /api/*
-        ├── components/
-        │   ├── DayAheadView.jsx    # Tab 1: forecast for a chosen delivery day
-        │   ├── AccuracyView.jsx    # Tab 2: error analysis for all of Jan 2026
-        │   ├── KpiCard.jsx         # small number tiles
-        │   └── Controls.jsx        # date picker + cutoff hour selector
-        └── styles.css
+        ├── main.jsx            # React entry
+        ├── App.jsx             # header, decision-time selector, tabs
+        ├── api.js              # fetch helpers + useApi hook (loading / error state)
+        ├── theme.js            # chart colours (light/dark) + number formatting
+        ├── styles.css          # all styling, light + dark via CSS variables
+        └── components/
+            ├── DayAheadView.jsx   # Tab 1: forecast vs actual for one delivery day
+            ├── AccuracyView.jsx   # Tab 2: error analysis for the whole month
+            ├── KpiCard.jsx        # small number tile
+            └── ChartCard.jsx      # titled chart box + Status (loading / error)
 ```
 
 ---
 
 ## 4. Backend (Python / FastAPI)
 
-### 4.1 Data loading — `data_store.py`
-- Reads both CSVs with pandas, parses times as UTC.
-- Actuals are filtered to on-the-hour rows (`minute == 0`) for comparison.
-- Wrapped in `functools.lru_cache`, so data loads once per process (also fine for serverless).
+### 4.1 `data_store.py`: loading
+Reads both CSVs with pandas, parses times as UTC, keeps only on-the-hour actuals.
+`lru_cache` makes it load once per process (also fine on serverless).
 
-### 4.2 Core logic — `forecast.py`
+### 4.2 `forecast.py`: the core rule
+| Function | What it does |
+|---|---|
+| `delivery_day(start_times)` | UK calendar day each target hour belongs to. |
+| `decision_cutoff(days, cutoff_hour)` | D-1 at `cutoff_hour` UK local time, converted to UTC (handles GMT/BST). |
+| `decision_forecasts(forecasts, cutoff_hour)` | For every target hour in 2 Jan → 1 Feb: drop runs published after its cutoff, keep the latest remaining one. Returns `startTime, publishTime, forecast, horizon_h, day`. |
+| `with_actuals(selected, actuals)` | Joins on `startTime`, adds `error = actual − forecast`. |
+| `one_day(selected, day)` | Filters to one delivery day. |
 
-```python
-def select_forecast(forecasts, delivery_day, cutoff_hour) -> DataFrame:
-    cutoff = (delivery_day - 1 day) at cutoff_hour, Europe/London → UTC
-    runs   = forecasts[forecasts.publishTime <= cutoff]
-    latest = runs.publishTime.max()
-    return runs[(runs.publishTime == latest) & (startTime within delivery_day)]
-```
+It is fully vectorised in pandas (no Python loops over rows): filter → sort by `publishTime` → `groupby(startTime).last()`.
 
-Then it joins with actuals on `startTime` and returns rows like:
-`{time, forecast, actual, error, publishTime, horizon_h}`.
+### 4.3 `metrics.py`: error statistics
+- **MAE**: typical miss in MW (headline). **nMAE %** = MAE ÷ mean actual.
+- **RMSE**: punishes big misses. **Bias**: mean error (is the forecast systematically high or low?).
+- **P10 / P50 / P90 of error**: "80% of hours the actual was between forecast + P10 and forecast + P90".
+  Used for the shaded band in the day view and as a safety margin for buying.
+- **By hour of day**, **by day**, **histogram** (500 MW bins).
+- **By horizon**: MAE grouped by lead time (0–6 h … 42–48 h), using *all* runs. This shows that forecasts
+  made further ahead are worse.
+- **Bias correction (walk-forward)**: each day's forecast is shifted by the mean error of *earlier days
+  only*. This shows how much a simple correction would help without cheating.
 
-Notes:
-- "Delivery day" = UK calendar day (Europe/London). January is GMT, so UK time = UTC, which keeps things simple. We still use the timezone properly.
-- If a forecast row is missing for some hour, that hour is skipped (never filled with made-up data).
-
-### 4.3 Metrics — `metrics.py`
-For all delivery days 1–31 Jan 2026, using the same cutoff rule:
-- **MAE** (mean absolute error, MW): the main "typical miss" number.
-- **RMSE** (MW): punishes big misses.
-- **Bias / mean error** (MW): does the forecast tend to be too high or too low?
-- **P10 / P50 / P90 of error**: "in 80% of hours the real wind was between forecast −X and +Y MW". **This is the number traders can use directly** as a safety margin.
-- **Normalised MAE (%)**: MAE ÷ mean actual, so it is easy to compare.
-- **Error by hour of day** (0–23): which hours are harder to forecast.
-- **Error by horizon** (bonus): MAE grouped by lead time (e.g. 12–24h, 24–36h, 36–48h), using *all* forecast runs. This shows that "older forecasts are worse".
-
-Error convention: **error = actual − forecast** (positive = more wind than forecast = you over-bought).
-
-### 4.4 API endpoints — `main.py`
-
+### 4.4 `main.py`: API endpoints
 | Method & path | Params | Returns |
 |---|---|---|
 | `GET /api/health` | – | `{"status":"ok"}` |
-| `GET /api/meta` | – | available date range, default cutoff |
-| `GET /api/day-ahead` | `date=2026-01-15`, `cutoff_hour=10` | hourly series (forecast, actual, error), forecast publishTime used, day KPIs, P10/P90 band |
-| `GET /api/accuracy` | `cutoff_hour=10` | overall KPIs, error histogram bins, by-hour MAE, by-horizon MAE, daily MAE list |
+| `GET /api/meta` | – | delivery date range, default cutoff |
+| `GET /api/day-ahead` | `date=2026-01-15`, `cutoff_hour=10` | hourly points (forecast, actual, error, horizon, P10–P90 band), forecast run used, day KPIs |
+| `GET /api/accuracy` | `cutoff_hour=10` | month KPIs, histogram, by-hour, daily, by-horizon, bias correction |
 
-Bad input (date outside January, hour not 0–23) returns **HTTP 400** with a clear message.
+Validation: a malformed date or `cutoff_hour` outside 0–23 gives **422** (FastAPI automatic); a date outside
+the delivery range gives **400**. The results per cutoff hour are cached (`lru_cache`).
+Interactive docs: `/docs` (Swagger).
 
 ---
 
 ## 5. Frontend (React + Vite + Recharts)
 
-Two tabs, one simple header ("GB Wind Forecast Monitor — Jan 2026").
+- **Header**: title + **decision time** selector (shared by both tabs).
+- **Tab 1, Day-ahead forecast**: date picker with ←/→, a banner *"Showing the forecast published 14 Jan
+  09:30, the latest one available at your decision time of 14 Jan 10:00"*, 4 KPI cards, and a chart of
+  forecast (blue) vs actual (orange) with a shaded P10–P90 band.
+- **Tab 2, Forecast accuracy**: 4 KPI cards (MAE, bias, P10/P90, worst hour), a **"What this means for
+  buying"** box written in plain words, and 4 charts (by day, by lead time, by hour, error histogram).
 
-**Tab 1 — Day-Ahead View** (question 1)
-- Controls: delivery date picker (Jan 2026), decision cutoff hour (default 10:00).
-- Text label: *"Using forecast published 2026-01-14 09:30 UK (latest before your 10:00 cutoff)"*.
-- Line chart: forecast (blue) vs actual (green), with a shaded **P10–P90 uncertainty band** around the forecast (taken from historical errors).
-- KPI cards: forecast total MWh for the day, actual MWh, MAE for the day, max miss.
-
-**Tab 2 — Forecast Accuracy** (question 2)
-- KPI cards: MAE, RMSE, bias, normalised MAE %, P10/P90.
-- Histogram of errors.
-- Bar chart: MAE by hour of day.
-- Bar chart: MAE by forecast horizon.
-- Line chart: daily MAE across January (spot bad days, e.g. storms).
-- A short "What this means for buying" box, e.g. *"Plan for wind to come in up to X MW below forecast in 1 hour out of 10."*
-
-Data flow inside the frontend: `Controls` change state → `useEffect` calls `api.js` → result stored in `useState` → charts re-render. No Redux, no extra state library.
+Data flow: control changes → `useApi` hook calls `api.js` → state → charts re-render. There is no global state
+library. The tab is kept in the URL hash (`/#accuracy`), so views can be linked. Colours come from a
+colour-blind-validated palette, with separate light and dark mode values.
 
 ---
 
@@ -182,10 +174,10 @@ sequenceDiagram
     participant A as FastAPI /api/day-ahead
     participant S as data_store (pandas, cached)
     participant L as forecast.py + metrics.py
-    U->>R: picks 15 Jan, cutoff 10:00
+    U->>R: picks 15 Jan, decision time 10:00
     R->>A: GET /api/day-ahead?date=2026-01-15&cutoff_hour=10
-    A->>S: get forecasts + actuals (already in memory)
-    A->>L: select_forecast(...) then join actuals, compute KPIs
+    A->>S: forecasts + actuals (already in memory)
+    A->>L: decision_forecasts → with_actuals → one_day → summary
     L-->>A: rows + KPIs + band
     A-->>R: JSON
     R-->>U: chart + KPI cards
@@ -197,26 +189,38 @@ sequenceDiagram
 
 | Where | How |
 |---|---|
-| Local (Docker) | `docker compose up --build` → frontend http://localhost:5173, API http://localhost:8000/docs |
-| Local (no Docker) | `uvicorn app.main:app --reload` in `backend/`, `npm run dev` in `frontend/` |
-| Production | **Vercel**: `frontend/` is built as a static site. `api/index.py` runs FastAPI as a Python serverless function on the same domain (`/api/*`), so CORS is not needed in production. |
-
-Why Vercel and not Heroku: Vercel is free, hosts React and a Python API in one project, and deploys from GitHub on every push.
+| Docker | `docker compose up --build` → app http://localhost:8080, API docs http://localhost:8000/docs |
+| Local dev | `cd backend && uvicorn app.main:app --reload` and `cd frontend && npm run dev` → http://localhost:5173 |
+| Production | **Vercel**: `frontend/` is built as a static site, `api/index.py` runs FastAPI as a Python serverless function on the same domain (`/api/*` rewrite). |
 
 ---
 
-## 8. Key engineering practices (talking points for the tech lead)
+## 8. Key engineering practices
 
-- **No look-ahead bias**: tested explicitly. A forecast published after the cutoff must never be chosen.
-- **Pure functions** for selection and metrics (DataFrame in, DataFrame/dict out). They are easy to unit test without HTTP.
-- **Thin API layer**: routes only validate input and call logic.
-- **Data snapshot committed**, so builds and demos are reproducible. The fetch script is idempotent.
-- **Config in one place** (`config.py`): dates, default cutoff, paths.
-- **Docker** for the same environment everywhere. **Vercel** for zero-ops hosting.
-- **AI-assisted development** is declared in the README.
+- **No look-ahead bias**, tested on synthetic cases *and* on the full real dataset for all 24 cutoff hours.
+- **Pure functions** for selection and metrics (DataFrame in → DataFrame/dict out), so they are easy to unit test.
+- **Thin API layer**: routes only validate and call logic.
+- **Data snapshot committed** → reproducible builds, demos and tests. The fetch script can be re-run.
+- **Config in one place** (`config.py`).
+- **Docker** (multi-stage frontend build, nginx) + **Vercel** for zero-ops hosting.
+- Small, phase-by-phase commits. **AI-assisted development** declared in the README.
 
-## 9. Known limitations / next steps
-- Wind only. Solar and demand forecasts would give a full residual-demand view.
-- Hourly comparison only (half-hour actuals at :30 are not used).
-- Cutoff is one hour for all days. Real auction times could be modelled per market (N2EX / EPEX).
-- Next steps: live data refresh, probabilistic forecast, alerts when forecast runs change a lot.
+## 9. Findings from the January 2026 data (10:00 cutoff)
+
+| Metric | Value |
+|---|---|
+| MAE | ~2.0 GW (17.7% of mean wind output) |
+| Bias | −1.7 GW: forecast systematically **too high** |
+| P10 / P90 error | −4.2 GW / +0.5 GW |
+| MAE by lead time | rises from 1.7 GW (0–6 h) to 2.3 GW (42–48 h) |
+| Walk-forward bias correction | MAE 1,991 → 1,464 MW (**−26%**) |
+
+A likely reason for the bias: WINDFOR estimates what the wind farms could produce, while FUELHH is metered
+output *after* curtailment (wind turned down for grid constraints). This is a hypothesis to confirm with more data.
+
+## 10. Known limitations / next steps
+- Wind only; solar and demand forecasts would give a full residual-demand view.
+- Hourly comparison only (the half-hour actuals at :30 are not used).
+- The P10–P90 band uses the whole month's errors (fine for a pilot review; live use should use only past data).
+- Next: live data refresh, a bias-corrected forecast as a product feature, per-market auction times, alerts when
+  forecast runs change a lot.

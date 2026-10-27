@@ -2,6 +2,22 @@
 
 Goal: a **simple, correct, well-explained** app, delivered quickly (budget ≤ 16 h). Read `ARCHITECTURE.md` first.
 
+## Status
+
+| Phase | Status |
+|---|---|
+| 0 Understand data | ✅ done |
+| 1 Data snapshot | ✅ done |
+| 2 Backend + tests | ✅ done (21 tests) |
+| 3 Frontend | ✅ done |
+| 4 Docker | ⏳ files ready, verifying build |
+| 5 Vercel | ⏳ config ready, deploy needs the owner's Vercel login |
+| 6 README/repo | ⏳ README done, public GitHub repo to create |
+| 7 Video | ⏳ owner records |
+| 8 Submit | ⏳ owner submits |
+
+Note: decisions are *made* in January, so delivery days are **2 Jan → 1 Feb 2026**.
+
 Guiding rule: **build the minimum that answers both questions very clearly.** Polish comes after correctness.
 
 ---
